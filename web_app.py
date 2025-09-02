@@ -361,9 +361,9 @@ def main_app():
         try:
             # 1) prefer explicit default ceny.csv paths
             candidates = [
-                os.path.join('data', 'user_data', 'lawrokh', 'price_imports', 'ceny.csv'),
-                os.path.join('data', 'price_imports', 'ceny.csv'),
-                os.path.join('data', 'ceny.csv'),
+                os.path.join(settings.DATA_ROOT, 'user_data', 'lawrokh', 'price_imports', 'ceny.csv'),
+                os.path.join(settings.DATA_ROOT, 'price_imports', 'ceny.csv'),
+                resource_path(os.path.join('data', 'ceny.csv')),
             ]
             chosen_path = None
             for c in candidates:
@@ -372,7 +372,7 @@ def main_app():
                     break
             # 2) otherwise pick newest user CSV
             if chosen_path is None:
-                imports_dir = os.path.join("data", "user_data", current_username, "price_imports")
+                imports_dir = os.path.join(settings.DATA_ROOT, "user_data", current_username, "price_imports")
                 if os.path.isdir(imports_dir):
                     csvs = [os.path.join(imports_dir, f) for f in os.listdir(imports_dir) if f.endswith(".csv")]
                     if csvs:
@@ -406,8 +406,8 @@ def main_app():
     @st.cache_resource(show_spinner=f"Loading data for {username}...")
     def load_user_services(username):
         """Loads all necessary services for a given user."""
-        # Use resource_path for executable compatibility
-        user_data_root = resource_path(os.path.join("data", "user_data", username))
+        # Use DATA_ROOT for writable paths (supports Fly.io persistent volume)
+        user_data_root = os.path.join(settings.DATA_ROOT, "user_data", username)
         data_path = resource_path(os.path.join("data", "eve_planets.parquet"))
         prices_path = os.path.join(user_data_root, "prices.json")
         mining_units_path = os.path.join(user_data_root, "mining_units.json")
@@ -879,7 +879,7 @@ def main_app():
 
         # Load from Saved (file backend only)
         if settings.DATA_BACKEND != "sql":
-            imports_dir = os.path.join("data", "user_data", username, "price_imports")
+            imports_dir = os.path.join(settings.DATA_ROOT, "user_data", username, "price_imports")
             saved_imports = [f for f in os.listdir(imports_dir) if f.endswith(".csv")] if os.path.isdir(imports_dir) else []
             if saved_imports:
                 selected_import = st.selectbox("Or load a saved file to set as default:", options=["-"] + saved_imports)

@@ -12,6 +12,8 @@ def main():
     
     # Uruchom aplikację Streamlit
     try:
+        # Uruchamiaj z katalogu pliku, by uniknąć błędu "File does not exist: web_app.py"
+        os.chdir(project_root)
         subprocess.run([sys.executable, "-m", "streamlit", "run", "web_app.py"], check=True)
     except subprocess.CalledProcessError as e:
         print(f"Błąd uruchamiania aplikacji: {e}")

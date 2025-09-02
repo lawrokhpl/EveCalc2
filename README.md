@@ -74,9 +74,32 @@ STREAMLIT_SERVER_HEADLESS=true
 STREAMLIT_SERVER_PORT=8080
 ```
 
-When `DATA_BACKEND=sql`:
-- The app stores users, preferences, prices, price history and mining units in Postgres (Cloud SQL on GCP).
-- For local development without Postgres, leave DB variables empty – the app falls back to SQLite at `data/local.db`.
+## Deploy on Fly.io
+
+Steps based on Fly.io platform docs [link](https://fly.io/):
+
+1) Install the CLI and login:
+```bash
+curl -L https://fly.io/install.sh | sh
+fly auth signup # or: fly auth login
+```
+2) In project root (`EveCalc/`), create app and volume:
+```bash
+fly launch --no-deploy --copy-config
+fly volumes create app_data --size 1 --region ams
+```
+3) Deploy:
+```bash
+fly deploy
+```
+4) Open app:
+```bash
+fly open
+```
+
+Notes:
+- Streamlit listens on port 8080; `fly.toml` maps it to 80/443.
+- Persistent user data (prices, preferences, mining units) is stored in `/data` (mounted volume).
 
 ## Technology Stack
 
