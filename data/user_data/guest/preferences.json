@@ -1,0 +1,45 @@
+{
+    "ship_cargo_capacity": 10000,
+    "planetary_storage_capacity": 920,
+    "tax_rate": 8.0,
+    "search_query": "jita",
+    "region_filter": [],
+    "pos_planner": {
+        "num_pos": 1,
+        "rows": [
+            {
+                "Fuel": "Heavy Water",
+                "Energy (GJ)": 2,
+                "POS 1 Storage (units)": 340000
+            },
+            {
+                "Fuel": "Suspended Plasma",
+                "Energy (GJ)": 5,
+                "POS 1 Storage (units)": 0
+            },
+            {
+                "Fuel": "Liquid Ozone",
+                "Energy (GJ)": 13,
+                "POS 1 Storage (units)": 320000
+            },
+            {
+                "Fuel": "Ionic Solutions",
+                "Energy (GJ)": 37,
+                "POS 1 Storage (units)": 280000
+            },
+            {
+                "Fuel": "Oxygen Isotopes",
+                "Energy (GJ)": 83,
+                "POS 1 Storage (units)": 38239
+            },
+            {
+                "Fuel": "Plasmoids",
+                "Energy (GJ)": 191,
+                "POS 1 Storage (units)": 0
+            }
+        ],
+        "pos_1_consumption_gjh": 14400.0
+    },
+    "pos_cost": 1500000000,
+    "resource_filter": []
+}
