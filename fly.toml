@@ -10,7 +10,7 @@ primary_region = "ams"
   STREAMLIT_SERVER_HEADLESS = "true"
   DATA_ROOT = "/data"
 
-[mounts]
+[[]mounts]
   source = "app_data"
   destination = "/data"
 
@@ -20,7 +20,6 @@ primary_region = "ams"
   auto_start_machines = true
   auto_stop_machines = "off"
   min_machines_running = 1
-  processes = ["app"]
 
   [[http_service.checks]]
     interval = "10s"
