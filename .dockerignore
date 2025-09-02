@@ -1,0 +1,17 @@
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+node_modules/
+*.log
+dist/
+build/
+.git/
+.gitignore
+*.ipynb
+db/
+Dockerfile
+
