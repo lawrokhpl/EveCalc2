@@ -1,4 +1,4 @@
-app = "eve-echoes-optimizer-pl"
+app = "eveechoes2"
 primary_region = "waw"
 
 [build]
