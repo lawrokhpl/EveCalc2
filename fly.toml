@@ -1,4 +1,5 @@
-app = "eve-echoes-optimizer"
+app = "eve-echoes-optimizer-pl"
+primary_region = "waw"
 
 [build]
   dockerfile = "Dockerfile"
@@ -9,25 +10,7 @@ app = "eve-echoes-optimizer"
   STREAMLIT_SERVER_HEADLESS = "true"
   DATA_ROOT = "/data"
 
-[[services]]
+[http_service]
   internal_port = 8080
-
-  [services.concurrency]
-    type = "requests"
-    soft_limit = 25
-    hard_limit = 50
-
-  [[services.ports]]
-    handlers = ["http"]
-    port = 80
-
-  [[services.ports]]
-    handlers = ["tls", "http"]
-    port = 443
-
-  [[services.http_checks]]
-    interval = "10s"
-    timeout = "2s"
-    method = "get"
-    path = "/_stcore/health"
+  force_https = true
 
