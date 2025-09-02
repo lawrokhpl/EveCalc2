@@ -10,30 +10,24 @@ primary_region = "ams"
   STREAMLIT_SERVER_HEADLESS = "true"
   DATA_ROOT = "/data"
 
-[[mounts]]
+[mounts]
   source = "app_data"
   destination = "/data"
 
-[[services]]
+[http_service]
   internal_port = 8080
+  force_https = true
+  auto_start_machines = true
+  auto_stop_machines = "off"
+  min_machines_running = 1
   processes = ["app"]
 
-  [services.concurrency]
-    type = "requests"
-    soft_limit = 25
-    hard_limit = 50
-
-  [[services.ports]]
-    handlers = ["http"]
-    port = 80
-
-  [[services.ports]]
-    handlers = ["tls", "http"]
-    port = 443
-
-  [services.http_checks]
+  [[http_service.checks]]
     interval = "10s"
     timeout = "2s"
-    method = "get"
+    method = "GET"
     path = "/_stcore/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
 
