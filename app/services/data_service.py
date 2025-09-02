@@ -23,6 +23,18 @@ class DataService:
         else:
             raise FileNotFoundError(f"Data file not found at {self.data_path} or {parquet_path}")
 
+        # Downcast & optimize dtypes to reduce RAM
+        try:
+            if 'Planet ID' in self.df.columns:
+                self.df['Planet ID'] = self.df['Planet ID'].astype('int32', errors='ignore')
+            if 'Output' in self.df.columns:
+                self.df['Output'] = pd.to_numeric(self.df['Output'], errors='coerce').astype('float32')
+            for col in ['Region', 'Constellation', 'System', 'Planet Name', 'Planet Type', 'Resource', 'Richness']:
+                if col in self.df.columns:
+                    self.df[col] = self.df[col].astype('category')
+        except Exception:
+            pass
+
         mining_units = self._load_mining_units()
         self._process_data(mining_units)
         

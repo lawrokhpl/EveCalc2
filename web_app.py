@@ -610,7 +610,7 @@ def main_app():
 
     # Prepare data for display
     # Perform calculations on the filtered dataframe for performance
-    df = filtered_df.copy()
+    df = filtered_df
     
     # Update mining units from objects, as they can change
     df['Mining Units'] = df['obj'].apply(lambda r: r.mining_units)
