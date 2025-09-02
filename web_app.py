@@ -363,6 +363,7 @@ def main_app():
             candidates = [
                 os.path.join(settings.DATA_ROOT, 'user_data', 'lawrokh', 'price_imports', 'ceny.csv'),
                 os.path.join(settings.DATA_ROOT, 'price_imports', 'ceny.csv'),
+                resource_path(os.path.join('data', 'price_imports', 'ceny.csv')),
                 resource_path(os.path.join('data', 'ceny.csv')),
             ]
             chosen_path = None
@@ -372,6 +373,14 @@ def main_app():
                     break
             # 2) otherwise pick newest user CSV
             if chosen_path is None:
+                # 2a) packaged CSVs in repo (data/price_imports)
+                pkg_imports = resource_path(os.path.join('data', 'price_imports'))
+                if os.path.isdir(pkg_imports):
+                    pkg_csvs = [os.path.join(pkg_imports, f) for f in os.listdir(pkg_imports) if f.endswith('.csv')]
+                    if pkg_csvs:
+                        chosen_path = max(pkg_csvs, key=lambda p: os.path.getmtime(p))
+            if chosen_path is None:
+                # 2b) newest user CSV
                 imports_dir = os.path.join(settings.DATA_ROOT, "user_data", current_username, "price_imports")
                 if os.path.isdir(imports_dir):
                     csvs = [os.path.join(imports_dir, f) for f in os.listdir(imports_dir) if f.endswith(".csv")]
