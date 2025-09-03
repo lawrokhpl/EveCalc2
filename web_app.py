@@ -315,7 +315,11 @@ def main_app():
     
     # --- Load User Preferences ---
     if 'user_prefs' not in st.session_state:
-        st.session_state.user_prefs = user_service.load_user_preferences(username)
+        # Dla guest nie zapisujemy na serwerze; tylko localStorage
+        if username == "guest":
+            st.session_state.user_prefs = {}
+        else:
+            st.session_state.user_prefs = user_service.load_user_preferences(username)
 
     # Jednorazowe wczytanie preferencji z localStorage (per urządzenie/przeglądarka)
     if not st.session_state.get('local_storage_prefs_loaded'):
@@ -346,19 +350,53 @@ def main_app():
 
     def save_prefs():
         """Callback to save preferences."""
-        user_service.save_user_preferences(username, st.session_state.user_prefs)
+        if username != "guest":
+            user_service.save_user_preferences(username, st.session_state.user_prefs)
         _save_prefs_to_local_storage()
 
     def set_pref(pref_key, value):
         """Utility to persist a single preference immediately."""
         st.session_state.user_prefs[pref_key] = value
-        user_service.save_user_preferences(username, st.session_state.user_prefs)
+        if username != "guest":
+            user_service.save_user_preferences(username, st.session_state.user_prefs)
         _save_prefs_to_local_storage()
 
     def autoload_latest_prices(current_username: str, svc: "PriceService") -> None:
         """Load default prices from ceny.csv if available, else newest CSV in user's folder.
         Accepts CSV with columns: resource + (price | average/buy)."""
         try:
+            import csv
+            def _csv_to_dict(path: str):
+                try:
+                    with open(path, newline='', encoding='utf-8') as f:
+                        reader = csv.DictReader(f)
+                        name_key = None
+                        for k in reader.fieldnames or []:
+                            kk = (k or '').strip().lower()
+                            if kk in ("resource", "name"):
+                                name_key = k
+                                break
+                        if not name_key:
+                            return {}
+                        rows = list(reader)
+                        def get_num(row, keys):
+                            for key in keys:
+                                if key in row and row[key] not in (None, ""):
+                                    try:
+                                        return float(row[key])
+                                    except Exception:
+                                        continue
+                            return 0.0
+                        prices = {}
+                        for r in rows:
+                            res = str(r.get(name_key, "")).strip()
+                            if not res:
+                                continue
+                            val = get_num(r, ["average", "avg", "price", "buy"])  # prefer avg/price
+                            prices[res] = val
+                        return prices
+                except Exception:
+                    return {}
             # 1) prefer explicit default ceny.csv paths
             candidates = [
                 os.path.join(settings.DATA_ROOT, 'user_data', 'lawrokh', 'price_imports', 'ceny.csv'),
@@ -387,15 +425,7 @@ def main_app():
                     if csvs:
                         chosen_path = max(csvs, key=lambda p: os.path.getmtime(p))
             if chosen_path and os.path.exists(chosen_path):
-                dfp = pd.read_csv(chosen_path)
-                price_dict = {}
-                if 'resource' in dfp.columns and 'price' in dfp.columns:
-                    price_dict = pd.Series(dfp['price'].fillna(0.0).values, index=dfp['resource']).to_dict()
-                elif 'resource' in dfp.columns and ('average' in dfp.columns or 'buy' in dfp.columns):
-                    if 'average' in dfp.columns:
-                        price_dict = pd.Series(dfp['average'].fillna(0.0).values, index=dfp['resource']).to_dict()
-                    else:
-                        price_dict = pd.Series(dfp['buy'].fillna(0.0).values, index=dfp['resource']).to_dict()
+                price_dict = _csv_to_dict(chosen_path)
                 if price_dict:
                     svc.update_multiple_prices(price_dict)
                     try:
@@ -941,6 +971,24 @@ def main_app():
                     st.success("Prices saved successfully as default!")
                     st.rerun()
 
+        st.divider()
+        st.subheader("Fetch from API (echoes.mobi)")
+        with st.form("fetch_echoes_api_form"):
+            api_url = st.text_input("API URL", value="https://echoes.mobi/api")
+            fetch = st.form_submit_button("Fetch and Apply Prices", type="primary")
+            if fetch:
+                try:
+                    fetched = price_service.fetch_from_echoes_api(api_url)
+                    if fetched:
+                        price_service.update_multiple_prices(fetched)
+                        price_service.save_prices()
+                        st.success(f"Fetched {len(fetched)} prices from API and saved.")
+                        st.rerun()
+                    else:
+                        st.warning("No prices parsed from the provided API.")
+                except Exception as e:
+                    st.error(f"Failed to fetch prices: {e}")
+
     with tab3:
         st.header("POS Fuel Planner")
         st.info("Wprowadź magazyny paliwa i zużycie/h dla każdego POS, aby obliczyć czas pracy.")
@@ -1004,7 +1052,7 @@ def main_app():
         cons_cols = st.columns(min(num_pos, 4)) if num_pos > 1 else st.columns(1)
         consumptions = []
         for i in range(1, num_pos + 1):
-            default_val = float(planner.get(f'pos_{i}_consumption_gjh', 0))
+            default_val = float(planner.get(f'pos_{i}_consumption_gjh', 18000))
             col = cons_cols[(i-1) % len(cons_cols)]
             val = col.number_input(f"POS {i}", min_value=0.0, value=default_val, step=1.0, key=f"pos_{i}_cons_gjh")
             consumptions.append(val)

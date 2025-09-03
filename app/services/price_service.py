@@ -5,6 +5,7 @@ import re
 from datetime import datetime
 from typing import Dict, List
 from app.models.price_model import ResourcePrice
+import requests
 
 class PriceService:
     def __init__(self, price_file_path: str = "data/prices.json"):
@@ -54,6 +55,58 @@ class PriceService:
                 self.save_prices()
         except Exception as e:
             print(f"Error importing prices: {e}") 
+
+    def fetch_from_echoes_api(self, url: str = "https://echoes.mobi/api") -> Dict[str, float]:
+        """
+        Fetches prices from echoes.mobi API endpoint.
+        Expects a CSV/JSON-like response that contains columns for resource name
+        and one of: average | buy | sell | price. Returns a dict resource->price
+        using preference average > buy > price.
+        """
+        try:
+            resp = requests.get(url, timeout=20)
+            resp.raise_for_status()
+            content_type = resp.headers.get('Content-Type','')
+            # Try CSV first
+            text = resp.text
+            import io
+            import pandas as pd
+            price_dict: Dict[str, float] = {}
+            try:
+                df = pd.read_csv(io.StringIO(text))
+            except Exception:
+                # Try JSON
+                try:
+                    data = resp.json()
+                    df = pd.DataFrame(data)
+                except Exception:
+                    return {}
+
+            # Normalize column names
+            cols = {c.lower().strip(): c for c in df.columns}
+            name_col = None
+            for candidate in ["resource", "name", "item", "resource_name", "resource_name_collection.0"]:
+                if candidate in cols:
+                    name_col = cols[candidate]
+                    break
+            avg_col = cols.get("average") or cols.get("avg") or cols.get("cena średnia") or cols.get("cena_srednia")
+            buy_col = cols.get("buy") or cols.get("cena kupna") or cols.get("cena_kupna")
+            price_col = cols.get("price")
+            if name_col is None:
+                return {}
+            df[name_col] = df[name_col].astype(str).str.strip()
+            if avg_col and avg_col in df.columns:
+                series = pd.to_numeric(df[avg_col], errors='coerce').fillna(0.0)
+            elif buy_col and buy_col in df.columns:
+                series = pd.to_numeric(df[buy_col], errors='coerce').fillna(0.0)
+            elif price_col and price_col in df.columns:
+                series = pd.to_numeric(df[price_col], errors='coerce').fillna(0.0)
+            else:
+                return {}
+            price_dict = pd.Series(series.values, index=df[name_col]).to_dict()
+            return price_dict
+        except Exception:
+            return {}
 
     def get_price_history(self, username):
         """
