@@ -5,10 +5,11 @@ import json
 from app.services.data_service import DataService
 from app.services.price_service import PriceService
 from app.services.analytics_service import AnalyticsService
-from app.services.user_service import UserService
+from app.services import prefs_service
 from app.config import settings
 from app.path_utils import resource_path
 from streamlit_js_eval import streamlit_js_eval
+import json
 
 # --- Page Configuration ---
 st.set_page_config(
@@ -32,8 +33,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- Demo mode (no authentication) ---
-user_service = UserService(user_file_path=resource_path("app/secure/users.json"))
+# --- Guest mode only (no authentication) ---
 st.session_state.authentication_status = True
 st.session_state.username = "guest"
 
@@ -174,28 +174,12 @@ def login_form():
         """, unsafe_allow_html=True)
     
     with col2:
-        # Login Form with styling
+        # Login Form (disabled)
         st.markdown("### 🔐 Login")
-        
         with st.form("login_form"):
-            username = st.text_input("Username", placeholder="Enter username")
-            password = st.text_input("Password", type="password", placeholder="Enter password")
-            submitted = st.form_submit_button("Login", type="primary", use_container_width=True)
-            if submitted:
-                if user_service.verify_user(username, password):
-                    st.session_state.authentication_status = True
-                    st.session_state.username = username
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid username or password")
+            st.caption("Login disabled. You are using guest mode.")
+            st.form_submit_button("Login", disabled=True, use_container_width=True)
 
-        if settings.ALLOW_GUEST:
-            st.markdown("---")
-            if st.button("Continue as Guest (no persistence)", use_container_width=True):
-                st.session_state.authentication_status = True
-                st.session_state.username = "guest"
-                st.rerun()
-        
         # Support section in the right column
         st.markdown("### 💰 Support")
         st.markdown("""
@@ -271,7 +255,7 @@ def registration_form():
                 elif not privacy_policy_accepted:
                     st.error("❌ You must accept the Privacy Policy to register.")
                 else:
-                    success, message = user_service.register_user(username, password)
+                    success, message = False, "Registration disabled"
                     if success:
                         st.success("✅ " + message)
                         st.info("You can now login with your credentials.")
@@ -304,7 +288,7 @@ def registration_form():
                 <p style="margin: 0; color: #666; font-size: 0.6rem;">in EVE Echoes</p>
             </div>
             <p style="margin: 0; font-style: italic; color: #666; font-size: 0.6rem;">
-                Thank you! o7
+        Thank you! o7
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -315,11 +299,11 @@ def main_app():
     
     # --- Load User Preferences ---
     if 'user_prefs' not in st.session_state:
-        # Dla guest nie zapisujemy na serwerze; tylko localStorage
+        # Dla gościa nie ładujemy z pliku (tylko localStorage); dla innych wczytujemy z pliku
         if username == "guest":
             st.session_state.user_prefs = {}
         else:
-            st.session_state.user_prefs = user_service.load_user_preferences(username)
+            st.session_state.user_prefs = prefs_service.load_prefs(username)
 
     # Jednorazowe wczytanie preferencji z localStorage (per urządzenie/przeglądarka)
     if not st.session_state.get('local_storage_prefs_loaded'):
@@ -351,15 +335,62 @@ def main_app():
     def save_prefs():
         """Callback to save preferences."""
         if username != "guest":
-            user_service.save_user_preferences(username, st.session_state.user_prefs)
+            prefs_service.save_prefs(username, st.session_state.user_prefs)
         _save_prefs_to_local_storage()
 
     def set_pref(pref_key, value):
         """Utility to persist a single preference immediately."""
         st.session_state.user_prefs[pref_key] = value
         if username != "guest":
-            user_service.save_user_preferences(username, st.session_state.user_prefs)
+            prefs_service.save_prefs(username, st.session_state.user_prefs)
         _save_prefs_to_local_storage()
+
+    # Wymuś szybki start: przy pierwszym uruchomieniu sesji ustaw "Jita"
+    if not st.session_state.get('applied_default_filter'):
+        st.session_state.user_prefs['system_filter'] = ['Jita']
+        prefs_service.save_prefs(username, st.session_state.user_prefs)
+        _save_prefs_to_local_storage()
+        st.session_state.applied_default_filter = True
+
+    def _load_price_file_to_dict(path: str) -> dict:
+        try:
+            if path.lower().endswith('.json'):
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        return {str(k): float(v or 0.0) for k, v in data.items()}
+                    return {}
+            # CSV fallback (resource, price or average/buy)
+            import csv
+            with open(path, newline='', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                name_key = None
+                for k in reader.fieldnames or []:
+                    kk = (k or '').strip().lower()
+                    if kk in ("resource", "name"):
+                        name_key = k
+                        break
+                if not name_key:
+                    return {}
+                rows = list(reader)
+                def get_num(row, keys):
+                    for key in keys:
+                        if key in row and row[key] not in (None, ""):
+                            try:
+                                return float(row[key])
+                            except Exception:
+                                continue
+                    return 0.0
+                prices = {}
+                for r in rows:
+                    res = str(r.get(name_key, "")).strip()
+                    if not res:
+                        continue
+                    val = get_num(r, ["price", "average", "avg", "buy"])  # prefer price
+                    prices[res] = val
+                return prices
+        except Exception:
+            return {}
 
     def autoload_latest_prices(current_username: str, svc: "PriceService") -> None:
         """Load default prices from ceny.csv if available, else newest CSV in user's folder.
@@ -424,8 +455,12 @@ def main_app():
                     csvs = [os.path.join(imports_dir, f) for f in os.listdir(imports_dir) if f.endswith(".csv")]
                     if csvs:
                         chosen_path = max(csvs, key=lambda p: os.path.getmtime(p))
+            # Prefer selected price file from sidebar prefs if exists
+            selected_file = st.session_state.user_prefs.get('selected_price_file')
+            if selected_file and os.path.exists(selected_file):
+                chosen_path = selected_file
             if chosen_path and os.path.exists(chosen_path):
-                price_dict = _csv_to_dict(chosen_path)
+                price_dict = _load_price_file_to_dict(chosen_path)
                 if price_dict:
                     svc.update_multiple_prices(price_dict)
                     try:
@@ -469,21 +504,85 @@ def main_app():
     # --- Sidebar ---
     with st.sidebar:
         st.title(f"Welcome, {username}")
-        if st.button("Logout"):
-            st.session_state.authentication_status = None
-            st.session_state.username = None
-            st.rerun()
+
+        # Settings Sync przeniesione do sidebara (zamiast przycisku Logout)
+        with st.popover("Settings Sync"):
+            st.caption("Export/Import your current settings for use on another browser.")
+            try:
+                export_blob = dict(st.session_state.user_prefs)
+                try:
+                    export_blob['current_prices'] = price_service.get_all_prices()
+                except Exception:
+                    export_blob['current_prices'] = {}
+                prefs_json = json.dumps(export_blob, ensure_ascii=False, indent=2)
+            except Exception:
+                prefs_json = "{}"
+            st.download_button(
+                label="Export settings (JSON)",
+                data=prefs_json.encode("utf-8"),
+                file_name=f"{username}_settings.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+
+            uploaded_prefs = st.file_uploader("Import settings (JSON)", type=["json"], accept_multiple_files=False)
+            if uploaded_prefs is not None:
+                try:
+                    imported = json.loads(uploaded_prefs.read().decode("utf-8"))
+                    if isinstance(imported, dict):
+                        prices_payload = imported.pop('current_prices', None)
+                        st.session_state.user_prefs.update(imported)
+                        if prices_payload and isinstance(prices_payload, dict):
+                            price_service.update_multiple_prices({str(k): float(v or 0.0) for k, v in prices_payload.items()})
+                            price_service.save_prices()
+                        save_prefs()
+                        st.success("Settings imported successfully.")
+                        st.rerun()
+                    else:
+                        st.error("Invalid JSON content. Expected an object with preferences.")
+                except Exception as e:
+                    st.error(f"Failed to import settings: {e}")
         
         st.header("Filters")
         
-        # --- Price loading info ---
+        # Price selector w lewym menu
+        st.subheader("Price list")
+        price_set_paths = {}
+        for d in [resource_path(os.path.join("data", "price_sets")), os.path.join(settings.DATA_ROOT, "price_sets")]:
+            if os.path.isdir(d):
+                for f in os.listdir(d):
+                    if f.lower().endswith((".json", ".csv")):
+                        price_set_paths[f] = os.path.join(d, f)
+        price_options = ["- none -"] + sorted(price_set_paths.keys())
+        default_choice = st.session_state.user_prefs.get('selected_price_choice', price_options[1] if len(price_options) > 1 else price_options[0])
+        selected_choice = st.selectbox("Select price file", options=price_options, index=price_options.index(default_choice) if default_choice in price_options else 0, key="side_price_choice")
+        if selected_choice != st.session_state.user_prefs.get('selected_price_choice'):
+            st.session_state.user_prefs['selected_price_choice'] = selected_choice
+            if selected_choice != "- none -":
+                st.session_state.user_prefs['selected_price_file'] = price_set_paths[selected_choice]
+            else:
+                st.session_state.user_prefs.pop('selected_price_file', None)
+            save_prefs()
+            try:
+                if selected_choice != "- none -":
+                    price_dict = _load_price_file_to_dict(price_set_paths[selected_choice])
+                    if price_dict:
+                        price_service.update_multiple_prices(price_dict)
+                        price_service.save_prices()
+                        st.toast("Applied selected price list.", icon="✅")
+            except Exception:
+                pass
+
+        # Informacja o liczbie wczytanych cen
         try:
             prices_count = len(price_service.get_all_prices())
             st.caption(f"Current prices loaded: {prices_count}")
         except Exception:
             pass
 
-        # --- Persisted Filters ---
+        st.divider()
+        st.header("Filters")
+        
         # Search
         search_query = st.text_input(
             "Search System, Constellation, or Region",
@@ -493,19 +592,21 @@ def main_app():
         )
         
         all_resources_list = data_service.get_all_resources()
+        res_default = [v for v in st.session_state.user_prefs.get('resource_filter', []) if v in all_resources_list]
         selected_resources = st.multiselect(
             "Resource",
             all_resources_list,
-            default=st.session_state.user_prefs.get('resource_filter', []),
+            default=res_default,
             key="resource_filter",
             on_change=lambda: set_pref('resource_filter', st.session_state.get('resource_filter', []))
         )
 
         regions = data_service.get_regions()
+        reg_default = [v for v in st.session_state.user_prefs.get('region_filter', []) if v in regions]
         selected_regions = st.multiselect(
             "Region",
             regions,
-            default=st.session_state.user_prefs.get('region_filter', []),
+            default=reg_default,
             key="region_filter",
             on_change=lambda: set_pref('region_filter', st.session_state.get('region_filter', []))
         )
@@ -514,10 +615,11 @@ def main_app():
             constellations_list = data_service.get_constellations()
         else:
             constellations_list = data_service.get_constellations(selected_regions)
+        cons_default = [v for v in st.session_state.user_prefs.get('constellation_filter', []) if v in constellations_list]
         selected_constellations = st.multiselect(
             "Constellation",
             constellations_list,
-            default=st.session_state.user_prefs.get('constellation_filter', []),
+            default=cons_default,
             key="constellation_filter",
             on_change=lambda: set_pref('constellation_filter', st.session_state.get('constellation_filter', []))
         )
@@ -526,10 +628,11 @@ def main_app():
             systems_list = data_service.get_systems()
         else:
             systems_list = data_service.get_systems(selected_constellations)
+        sys_default = [v for v in st.session_state.user_prefs.get('system_filter', []) if v in systems_list]
         selected_systems = st.multiselect(
             "System",
             systems_list,
-            default=st.session_state.user_prefs.get('system_filter', []),
+            default=sys_default,
             key="system_filter",
             on_change=lambda: set_pref('system_filter', st.session_state.get('system_filter', []))
         )
@@ -589,36 +692,25 @@ def main_app():
     # --- Main Page ---
     st.title("🪐 EVE Echoes Planetary Mining Optimizer")
 
-    # Toolbar w prawym górnym rogu: eksport/import ustawień
-    tcol1, tcol2 = st.columns([8, 2])
-    with tcol2:
-        with st.popover("Settings Sync"):
-            st.caption("Export/Import your current settings for use on another browser.")
-            try:
-                prefs_json = json.dumps(st.session_state.user_prefs, ensure_ascii=False, indent=2)
-            except Exception:
-                prefs_json = "{}"
-            st.download_button(
-                label="Export settings (JSON)",
-                data=prefs_json.encode("utf-8"),
-                file_name=f"{username}_settings.json",
-                mime="application/json",
-                use_container_width=True,
-            )
-
-            uploaded_prefs = st.file_uploader("Import settings (JSON)", type=["json"], accept_multiple_files=False)
-            if uploaded_prefs is not None:
-                try:
-                    imported = json.loads(uploaded_prefs.read().decode("utf-8"))
-                    if isinstance(imported, dict):
-                        st.session_state.user_prefs.update(imported)
-                        save_prefs()
-                        st.success("Settings imported successfully.")
-                        st.rerun()
-                    else:
-                        st.error("Invalid JSON content. Expected an object with preferences.")
-                except Exception as e:
-                    st.error(f"Failed to import settings: {e}")
+    # Top info tiles
+    st.markdown("""
+        <style>
+        .info-card{background:#f8f9fb;border:1px solid #e9ecef;border-radius:8px;padding:10px 12px;height:100%;}
+        .info-title{font-weight:600;margin:0 0 6px 0;font-size:0.95rem}
+        .info-desc{margin:0;color:#444;font-size:0.85rem}
+        </style>
+    """, unsafe_allow_html=True)
+    ic1, ic2, ic3, ic4, ic5 = st.columns(5)
+    with ic1:
+        st.markdown('<div class="info-card"><div class="info-title">🪐 Planetary Resource Analysis</div><p class="info-desc">Analyze resources across systems, constellations and regions.</p></div>', unsafe_allow_html=True)
+    with ic2:
+        st.markdown('<div class="info-card"><div class="info-title">💰 Price Management</div><p class="info-desc">Load daily price lists and edit prices per item.</p></div>', unsafe_allow_html=True)
+    with ic3:
+        st.markdown('<div class="info-card"><div class="info-title">📊 Mining Units Optimization</div><p class="info-desc">Set mining units directly in the table to see impact.</p></div>', unsafe_allow_html=True)
+    with ic4:
+        st.markdown('<div class="info-card"><div class="info-title">🚀 Logistics Planning</div><p class="info-desc">Plan cargo runs and volumes per day.</p></div>', unsafe_allow_html=True)
+    with ic5:
+        st.markdown('<div class="info-card"><div class="info-title">📈 Analytics & Reports</div><p class="info-desc">Income summaries and logistics overview.</p></div>', unsafe_allow_html=True)
 
     # Filtering logic on the master dataframe
     filtered_df = master_df
@@ -715,7 +807,7 @@ def main_app():
                                 changes_made = True
                 except Exception:
                     pass
-
+                
                 if changes_made:
                     data_service.save_mining_units()
                     data_service.update_dataframe_mining_units()
@@ -871,72 +963,11 @@ def main_app():
     with tab2:
         st.header("Price Management")
 
-        # --- Top Section: Import, Export, Load ---
-        st.subheader("Manage Price Files")
-
-        # Export Button (unchanged)
+        # --- Export ---
+        st.subheader("Export Current Prices")
         prices_df = pd.DataFrame(price_service.get_all_prices().items(), columns=["resource", "price"])
         st.download_button(label="Export Current Prices to CSV", data=prices_df.to_csv(index=False).encode('utf-8'), file_name="current_prices.csv", mime="text/csv")
 
-        # Import Uploader
-        uploaded_file = st.file_uploader("Upload a new price CSV (import into DB; no file stored)", type="csv")
-        if uploaded_file is not None:
-            try:
-                new_prices_df = pd.read_csv(uploaded_file)
-                if settings.DATA_BACKEND == "sql":
-                    try:
-                        from app.services.user_service_sql import SQLUserService
-                        uid = SQLUserService().get_user_id(username)
-                    except Exception:
-                        uid = None
-                    # Save history rows (resource,buy,sell,average[,date]) and update current cache from 'average' or 'buy'
-                    from datetime import datetime
-                    price_service.import_prices_dataframe(new_prices_df, user_id=uid, price_date=datetime.utcnow())
-                    # Update live cache from avg/buy if present, else 'price'
-                    price_dict = {}
-                    if 'average' in new_prices_df.columns:
-                        price_dict = pd.Series(new_prices_df['average'].fillna(0.0).values, index=new_prices_df['resource']).to_dict()
-                    elif 'buy' in new_prices_df.columns:
-                        price_dict = pd.Series(new_prices_df['buy'].fillna(0.0).values, index=new_prices_df['resource']).to_dict()
-                    elif 'price' in new_prices_df.columns:
-                        price_dict = pd.Series(new_prices_df['price'].fillna(0.0).values, index=new_prices_df['resource']).to_dict()
-                    price_service.update_multiple_prices(price_dict)
-                    price_service.save_prices()
-                    st.success("Imported CSV into DB and updated current prices.")
-                    st.rerun()
-                else:
-                    if "resource" in new_prices_df.columns and "price" in new_prices_df.columns:
-                        price_dict = pd.Series(new_prices_df.price.values, index=new_prices_df.resource).to_dict()
-                        price_service.update_multiple_prices(price_dict)
-                        price_service.save_prices()
-                        st.success("Imported CSV and updated current prices.")
-                        st.rerun()
-                    else:
-                        st.error("Invalid CSV format. Expected 'resource' and 'price' columns.")
-            except Exception as e:
-                st.error(f"An error occurred during import: {e}")
-
-        # Load from Saved (file backend only)
-        if settings.DATA_BACKEND != "sql":
-            imports_dir = os.path.join(settings.DATA_ROOT, "user_data", username, "price_imports")
-            saved_imports = [f for f in os.listdir(imports_dir) if f.endswith(".csv")] if os.path.isdir(imports_dir) else []
-            if saved_imports:
-                selected_import = st.selectbox("Or load a saved file to set as default:", options=["-"] + saved_imports)
-                if selected_import != "-":
-                    if st.button(f"Load: {selected_import}"):
-                        try:
-                            file_path = os.path.join(imports_dir, selected_import)
-                            imported_df = pd.read_csv(file_path)
-                            if "resource" in imported_df.columns and "price" in imported_df.columns:
-                                price_dict = pd.Series(imported_df.price.values, index=imported_df.resource).to_dict()
-                                price_service.update_multiple_prices(price_dict)
-                                price_service.save_prices()
-                                st.success(f"Successfully set {selected_import} as default prices.")
-                                st.rerun()
-                            else:
-                                st.error("Invalid CSV format in the selected file.")
-                        except Exception as e:
-                            st.error(f"An error occurred while loading the file: {e}")
 
         st.divider()
 

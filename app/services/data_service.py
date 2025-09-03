@@ -39,11 +39,21 @@ class DataService:
         self._process_data(mining_units)
         
     def _load_mining_units(self) -> Dict[str, int]:
-        """Load mining units. Uses SQL backend if enabled, otherwise JSON file."""
+        """Load mining units. Uses SQL backend if enabled, otherwise JSON file.
+        For guest sessions (path contains 'user_data/guest'), return empty to avoid
+        leaking units between browsers.
+        """
         from app.config import settings
         if settings.DATA_BACKEND == "sql":
             from app.services.mining_units_service_sql import SQLMiningUnitsService
             return SQLMiningUnitsService().load_units_map()
+        # Do not persist mining units for guest
+        try:
+            norm_path = os.path.normpath(self.mining_units_path)
+            if os.sep + "user_data" + os.sep + "guest" + os.sep in norm_path:
+                return {}
+        except Exception:
+            pass
         if os.path.exists(self.mining_units_path):
             try:
                 with open(self.mining_units_path, 'r') as f:
@@ -53,7 +63,9 @@ class DataService:
         return {}
 
     def save_mining_units(self) -> None:
-        """Save mining units. Uses SQL backend if enabled, otherwise JSON file."""
+        """Save mining units. Uses SQL backend if enabled, otherwise JSON file.
+        Skip saving for guest sessions (path contains 'user_data/guest').
+        """
         mining_units = {}
         for planet in self.planets.values():
             for resource in planet.resources:
@@ -66,6 +78,12 @@ class DataService:
             from app.services.mining_units_service_sql import SQLMiningUnitsService
             SQLMiningUnitsService().save_units_map(mining_units)
             return
+        try:
+            norm_path = os.path.normpath(self.mining_units_path)
+            if os.sep + "user_data" + os.sep + "guest" + os.sep in norm_path:
+                return  # don't save for guest
+        except Exception:
+            pass
         os.makedirs(os.path.dirname(self.mining_units_path), exist_ok=True)
         with open(self.mining_units_path, 'w') as f:
             json.dump(mining_units, f, indent=4)
